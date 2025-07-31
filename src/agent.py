@@ -136,7 +136,7 @@ class StoryExtractionAgent:
         except Exception as e:
             return {"error": str(e)}
     
-    def synchronize_epic(self, epic_id: str, stored_snapshot: Optional[Dict[str, str]] = None) -e EpicSyncResult:
+    def synchronize_epic(self, epic_id: str, stored_snapshot: Optional[Dict[str, str]] = None) -> EpicSyncResult:
         """Detect changes in an EPIC and synchronize its tasks"""
         try:
             self.logger.info(f"Synchronizing EPIC {epic_id}")
@@ -311,7 +311,7 @@ class StoryExtractionAgent:
         except Exception as e:
             raise Exception(f"Failed to update user story {story_id}: {str(e)}")
     
-    def get_epic_snapshot(self, epic_id: str) -e Optional[Dict[str, str]]:
+    def get_epic_snapshot(self, epic_id: str) -> Optional[Dict[str, str]]:
         """Get a snapshot of the current EPIC for change tracking"""
         try:
             numeric_id = self._parse_requirement_id(epic_id)
@@ -330,7 +330,7 @@ class StoryExtractionAgent:
             self.logger.error(f"Failed to get EPIC snapshot for {epic_id}: {str(e)}")
             return None
 
-    def _setup_logger(self) -e logging.Logger:
+    def _setup_logger(self) -> logging.Logger:
         """Setup logging configuration"""
         logger = logging.getLogger("StoryExtractionAgent")
         logger.setLevel(logging.INFO)

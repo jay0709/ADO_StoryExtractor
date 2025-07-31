@@ -163,4 +163,182 @@ class MonitorAPI:
         def force_check():
             """Force a check for changes"""
             try:
-                data = request.get_json() or {}\n                epic_id = data.get('epic_id')  # Optional: check specific EPIC\n                \n                if self.monitor:\n                    results = self.monitor.force_check(epic_id)\n                    return jsonify({\n                        'success': True,\n                        'results': results\n                    })\n                else:\n                    return jsonify({\n                        'success': False,\n                        'message': 'Monitor not initialized'\n                    }), 400\n                    \n            except Exception as e:\n                return jsonify({\n                    'success': False,\n                    'error': str(e)\n                }), 500\n        \n        @self.app.route('/api/config', methods=['GET'])\n        def get_config():\n            \"\"\"Get current configuration\"\"\"\n            return jsonify({\n                'config': {\n                    'poll_interval_seconds': self.config.poll_interval_seconds,\n                    'max_concurrent_syncs': self.config.max_concurrent_syncs,\n                    'snapshot_directory': self.config.snapshot_directory,\n                    'log_level': self.config.log_level,\n                    'epic_ids': self.config.epic_ids,\n                    'auto_sync': self.config.auto_sync,\n                    'retry_attempts': self.config.retry_attempts,\n                    'retry_delay_seconds': self.config.retry_delay_seconds\n                }\n            })\n        \n        @self.app.route('/api/config', methods=['PUT'])\n        def update_config():\n            \"\"\"Update configuration (requires restart to take effect)\"\"\"\n            try:\n                data = request.get_json()\n                \n                # Update configuration\n                if 'poll_interval_seconds' in data:\n                    self.config.poll_interval_seconds = data['poll_interval_seconds']\n                if 'auto_sync' in data:\n                    self.config.auto_sync = data['auto_sync']\n                if 'epic_ids' in data:\n                    self.config.epic_ids = data['epic_ids']\n                \n                return jsonify({\n                    'success': True,\n                    'message': 'Configuration updated (restart required to take effect)',\n                    'config': {\n                        'poll_interval_seconds': self.config.poll_interval_seconds,\n                        'auto_sync': self.config.auto_sync,\n                        'epic_ids': self.config.epic_ids\n                    }\n                })\n                \n            except Exception as e:\n                return jsonify({\n                    'success': False,\n                    'error': str(e)\n                }), 500\n        \n        @self.app.route('/api/logs', methods=['GET'])\n        def get_logs():\n            \"\"\"Get recent log entries\"\"\"\n            try:\n                # Get query parameters\n                lines = request.args.get('lines', 100, type=int)\n                \n                # Read log file\n                log_file = 'logs/epic_monitor.log'\n                try:\n                    with open(log_file, 'r') as f:\n                        log_lines = f.readlines()\n                    \n                    # Return last N lines\n                    recent_logs = log_lines[-lines:] if len(log_lines) > lines else log_lines\n                    \n                    return jsonify({\n                        'success': True,\n                        'logs': [line.strip() for line in recent_logs],\n                        'total_lines': len(log_lines)\n                    })\n                    \n                except FileNotFoundError:\n                    return jsonify({\n                        'success': True,\n                        'logs': [],\n                        'message': 'Log file not found'\n                    })\n                    \n            except Exception as e:\n                return jsonify({\n                    'success': False,\n                    'error': str(e)\n                }), 500\n        \n        @self.app.route('/api/health', methods=['GET'])\n        def health_check():\n            \"\"\"Health check endpoint\"\"\"\n            return jsonify({\n                'status': 'healthy',\n                'timestamp': datetime.now().isoformat(),\n                'monitor_running': self.monitor.is_running if self.monitor else False\n            })\n        \n        @self.app.route('/', methods=['GET'])\n        def index():\n            \"\"\"API documentation\"\"\"\n            return jsonify({\n                'name': 'EPIC Change Monitor API',\n                'version': '1.0.0',\n                'endpoints': {\n                    'GET /api/status': 'Get monitoring status',\n                    'POST /api/start': 'Start monitoring service',\n                    'POST /api/stop': 'Stop monitoring service',\n                    'GET /api/epics': 'List monitored EPICs',\n                    'POST /api/epics/<epic_id>': 'Add EPIC to monitoring',\n                    'DELETE /api/epics/<epic_id>': 'Remove EPIC from monitoring',\n                    'POST /api/check': 'Force check for changes',\n                    'GET /api/config': 'Get configuration',\n                    'PUT /api/config': 'Update configuration',\n                    'GET /api/logs': 'Get recent log entries',\n                    'GET /api/health': 'Health check'\n                },\n                'monitor_status': self.monitor.is_running if self.monitor else False\n            })\n    \n    def run(self, host='127.0.0.1', port=5000, debug=False):\n        \"\"\"Run the API server\"\"\"\n        self.app.run(host=host, port=port, debug=debug)\n\n\ndef main():\n    \"\"\"Main entry point for the API server\"\"\"\n    import argparse\n    \n    parser = argparse.ArgumentParser(description='EPIC Change Monitor API Server')\n    parser.add_argument('--config', default='monitor_config.json', help='Configuration file')\n    parser.add_argument('--host', default='127.0.0.1', help='API server host')\n    parser.add_argument('--port', type=int, default=5000, help='API server port')\n    parser.add_argument('--debug', action='store_true', help='Enable debug mode')\n    parser.add_argument('--create-config', action='store_true', help='Create default config file')\n    \n    args = parser.parse_args()\n    \n    if args.create_config:\n        create_default_config(args.config)\n        return\n    \n    # Load configuration\n    try:\n        config = load_config_from_file(args.config)\n    except:\n        print(f\"Failed to load config from {args.config}, creating default...\")\n        config = create_default_config(args.config)\n    \n    # Start API server\n    api = MonitorAPI(config)\n    print(f\"Starting EPIC Change Monitor API on {args.host}:{args.port}\")\n    print(f\"Configuration: {args.config}\")\n    print(f\"Monitoring {len(config.epic_ids or [])} EPICs\")\n    print(f\"API Documentation: http://{args.host}:{args.port}/\")\n    \n    try:\n        api.run(host=args.host, port=args.port, debug=args.debug)\n    except KeyboardInterrupt:\n        print(\"\\nShutting down API server...\")\n        if api.monitor:\n            api.monitor.stop()\n\n\nif __name__ == '__main__':\n    main()
+                data = request.get_json() or {}
+                epic_id = data.get('epic_id')  # Optional: check specific EPIC
+                
+                if self.monitor:
+                    results = self.monitor.force_check(epic_id)
+                    return jsonify({
+                        'success': True,
+                        'results': results
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Monitor not initialized'
+                    }), 400
+                    
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+        
+        @self.app.route('/api/config', methods=['GET'])
+        def get_config():
+            """Get current configuration"""
+            return jsonify({
+                'config': {
+                    'poll_interval_seconds': self.config.poll_interval_seconds,
+                    'max_concurrent_syncs': self.config.max_concurrent_syncs,
+                    'snapshot_directory': self.config.snapshot_directory,
+                    'log_level': self.config.log_level,
+                    'epic_ids': self.config.epic_ids,
+                    'auto_sync': self.config.auto_sync,
+                    'retry_attempts': self.config.retry_attempts,
+                    'retry_delay_seconds': self.config.retry_delay_seconds
+                }
+            })
+        
+        @self.app.route('/api/config', methods=['PUT'])
+        def update_config():
+            """Update configuration (requires restart to take effect)"""
+            try:
+                data = request.get_json()
+                
+                # Update configuration
+                if 'poll_interval_seconds' in data:
+                    self.config.poll_interval_seconds = data['poll_interval_seconds']
+                if 'auto_sync' in data:
+                    self.config.auto_sync = data['auto_sync']
+                if 'epic_ids' in data:
+                    self.config.epic_ids = data['epic_ids']
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Configuration updated (restart required to take effect)',
+                    'config': {
+                        'poll_interval_seconds': self.config.poll_interval_seconds,
+                        'auto_sync': self.config.auto_sync,
+                        'epic_ids': self.config.epic_ids
+                    }
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+        
+        @self.app.route('/api/logs', methods=['GET'])
+        def get_logs():
+            """Get recent log entries"""
+            try:
+                # Get query parameters
+                lines = request.args.get('lines', 100, type=int)
+                
+                # Read log file
+                log_file = 'logs/epic_monitor.log'
+                try:
+                    with open(log_file, 'r') as f:
+                        log_lines = f.readlines()
+                    
+                    # Return last N lines
+                    recent_logs = log_lines[-lines:] if len(log_lines) > lines else log_lines
+                    
+                    return jsonify({
+                        'success': True,
+                        'logs': [line.strip() for line in recent_logs],
+                        'total_lines': len(log_lines)
+                    })
+                    
+                except FileNotFoundError:
+                    return jsonify({
+                        'success': True,
+                        'logs': [],
+                        'message': 'Log file not found'
+                    })
+                    
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+        
+        @self.app.route('/api/health', methods=['GET'])
+        def health_check():
+            """Health check endpoint"""
+            return jsonify({
+                'status': 'healthy',
+                'timestamp': datetime.now().isoformat(),
+                'monitor_running': self.monitor.is_running if self.monitor else False
+            })
+        
+        @self.app.route('/', methods=['GET'])
+        def index():
+            """API documentation"""
+            return jsonify({
+                'name': 'EPIC Change Monitor API',
+                'version': '1.0.0',
+                'endpoints': {
+                    'GET /api/status': 'Get monitoring status',
+                    'POST /api/start': 'Start monitoring service',
+                    'POST /api/stop': 'Stop monitoring service',
+                    'GET /api/epics': 'List monitored EPICs',
+                    'POST /api/epics/<epic_id>': 'Add EPIC to monitoring',
+                    'DELETE /api/epics/<epic_id>': 'Remove EPIC from monitoring',
+                    'POST /api/check': 'Force check for changes',
+                    'GET /api/config': 'Get configuration',
+                    'PUT /api/config': 'Update configuration',
+                    'GET /api/logs': 'Get recent log entries',
+                    'GET /api/health': 'Health check'
+                },
+                'monitor_status': self.monitor.is_running if self.monitor else False
+            })
+    
+    def run(self, host='127.0.0.1', port=5000, debug=False):
+        """Run the API server"""
+        self.app.run(host=host, port=port, debug=debug)
+
+
+def main():
+    """Main entry point for the API server"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='EPIC Change Monitor API Server')
+    parser.add_argument('--config', default='monitor_config.json', help='Configuration file')
+    parser.add_argument('--host', default='127.0.0.1', help='API server host')
+    parser.add_argument('--port', type=int, default=5000, help='API server port')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--create-config', action='store_true', help='Create default config file')
+    
+    args = parser.parse_args()
+    
+    if args.create_config:
+        create_default_config(args.config)
+        return
+    
+    # Load configuration
+    try:
+        config = load_config_from_file(args.config)
+    except:
+        print(f"Failed to load config from {args.config}, creating default...")
+        config = create_default_config(args.config)
+    
+    # Start API server
+    api = MonitorAPI(config)
+    print(f"Starting EPIC Change Monitor API on {args.host}:{args.port}")
+    print(f"Configuration: {args.config}")
+    print(f"Monitoring {len(config.epic_ids or [])} EPICs")
+    print(f"API Documentation: http://{args.host}:{args.port}/")
+    
+    try:
+        api.run(host=args.host, port=args.port, debug=args.debug)
+    except KeyboardInterrupt:
+        print("\nShutting down API server...")
+        if api.monitor:
+            api.monitor.stop()
+
+
+if __name__ == '__main__':
+    main()
