@@ -13,54 +13,63 @@ class StoryExtractionAgent:
         self.story_extractor = StoryExtractor()
         self.logger = self._setup_logger()
     
-    def _parse_requirement_id(self, requirement_id: str) -> int:
-        """Parse numeric ID from string requirement ID"""
-        import re
-        # Extract numeric part from strings like "EPIC 1", "123", "REQ-456", etc.
-        numeric_match = re.search(r'\d+', str(requirement_id))
-        if numeric_match:
-            return int(numeric_match.group())
-        else:
-            raise ValueError(f"Could not extract numeric ID from '{requirement_id}'")
-    
     def process_requirement_by_id(self, requirement_id: str, upload_to_ado: bool = True) -> StoryExtractionResult:
-        """Process a single requirement by ID"""
-        self.logger.info(f"Processing requirement {requirement_id}")
-        
+        """Process a single requirement by ID (now supports string IDs)"""
+        print(f"\n[AGENT] Starting to process requirement ID: {requirement_id}")
         try:
+            # Accept string-based IDs (e.g., 'EPIC 1')
+            ado_id = requirement_id.strip()
+            print(f"[AGENT] Using requirement ID: {ado_id}")
+
             # Get requirement from ADO
-            requirement = self.ado_client.get_requirement_by_id(requirement_id)
+            print("[AGENT] Fetching requirement from Azure DevOps...")
+            requirement = self.ado_client.get_requirement_by_id(ado_id)
+
             if not requirement:
-                raise Exception(f"Requirement {requirement_id} not found")
-            
+                error_msg = f"Requirement {requirement_id} not found or access denied"
+                print(f"[ERROR] {error_msg}")
+                return StoryExtractionResult(
+                    requirement_id=requirement_id,
+                    requirement_title="",
+                    stories=[],
+                    extraction_successful=False,
+                    error_message=error_msg
+                )
+
+            print(f"[AGENT] Found requirement: {requirement.title}")
+
             # Extract stories
+            print("[DEBUG] StoryExtractionAgent: Starting story extraction")
             result = self.story_extractor.extract_stories(requirement)
             
             if not result.extraction_successful:
-                self.logger.error(f"Story extraction failed: {result.error_message}")
+                print(f"[ERROR] StoryExtractionAgent: Story extraction failed: {result.error_message}")
                 return result
             
-            # Validate stories
-            validation_issues = self.story_extractor.validate_stories(result.stories)
-            if validation_issues:
-                self.logger.warning(f"Story validation issues: {validation_issues}")
-            
+            print(f"[DEBUG] StoryExtractionAgent: Successfully extracted {len(result.stories)} stories")
+
             # Upload to ADO if requested
             if upload_to_ado and result.stories:
-                uploaded_story_ids = self._upload_stories_to_ado(result.stories, requirement_id)
-                self.logger.info(f"Created {len(uploaded_story_ids)} user stories: {uploaded_story_ids}")
-            
-            self.logger.info(f"Successfully processed requirement {requirement_id}, extracted {len(result.stories)} stories")
+                print("[DEBUG] StoryExtractionAgent: Starting upload to ADO")
+                try:
+                    uploaded_story_ids = self._upload_stories_to_ado(result.stories, requirement_id)
+                    print(f"[DEBUG] StoryExtractionAgent: Successfully uploaded {len(uploaded_story_ids)} stories")
+                except Exception as e:
+                    print(f"[ERROR] StoryExtractionAgent: Failed to upload stories: {str(e)}")
+                    result.error_message = f"Failed to upload stories: {str(e)}"
+                    result.extraction_successful = False
+
             return result
             
         except Exception as e:
-            self.logger.error(f"Failed to process requirement {requirement_id}: {str(e)}")
+            error_msg = f"Failed to process requirement {requirement_id}: {str(e)}"
+            print(f"[ERROR] StoryExtractionAgent: {error_msg}")
             return StoryExtractionResult(
                 requirement_id=requirement_id,
                 requirement_title="",
                 stories=[],
                 extraction_successful=False,
-                error_message=str(e)
+                error_message=error_msg
             )
     
     def process_all_requirements(self, state_filter: Optional[str] = None, upload_to_ado: bool = True) -> List[StoryExtractionResult]:
@@ -94,7 +103,7 @@ class StoryExtractionAgent:
     
     def _upload_stories_to_ado(self, stories: List[UserStory], parent_requirement_id: str) -> List[int]:
         """Upload user stories to ADO as child items of the requirement"""
-        parent_id = self._parse_requirement_id(parent_requirement_id)
+        parent_id = parent_requirement_id  # No numeric parsing anymore
         uploaded_ids = []
         
         for story in stories:
@@ -113,7 +122,7 @@ class StoryExtractionAgent:
     def get_requirement_summary(self, requirement_id: str) -> Dict[str, Any]:
         """Get a summary of a requirement and its child stories"""
         try:
-            numeric_id = self._parse_requirement_id(requirement_id)
+            numeric_id = requirement_id  # No numeric parsing
             requirement = self.ado_client.get_requirement_by_id(numeric_id)
             if not requirement:
                 return {"error": f"Requirement {requirement_id} not found"}
@@ -141,8 +150,8 @@ class StoryExtractionAgent:
         try:
             self.logger.info(f"Synchronizing EPIC {epic_id}")
             
-            numeric_epic_id = self._parse_requirement_id(epic_id)
-            
+            numeric_epic_id = epic_id  # No numeric parsing
+
             # Get current EPIC state
             current_epic = self.ado_client.get_requirement_by_id(epic_id)
             if not current_epic:
@@ -314,7 +323,7 @@ class StoryExtractionAgent:
     def get_epic_snapshot(self, epic_id: str) -> Optional[Dict[str, str]]:
         """Get a snapshot of the current EPIC for change tracking"""
         try:
-            numeric_id = self._parse_requirement_id(epic_id)
+            numeric_id = epic_id  # No numeric parsing
             snapshot = self.ado_client.detect_changes_in_epic(numeric_id)
             
             if snapshot:

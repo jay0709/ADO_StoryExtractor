@@ -4,7 +4,6 @@ import hashlib
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import requests
-from azure.devops.connection import Connection
 from azure.devops.v7_1.work_item_tracking import WorkItemTrackingClient
 from msrest.authentication import BasicAuthentication
 
@@ -19,27 +18,22 @@ class ADOClient:
         self.organization = Settings.ADO_ORGANIZATION
         self.project = Settings.ADO_PROJECT
         self.pat = Settings.ADO_PAT
-        self.base_url = Settings.ADO_BASE_URL
-        
-        # Create connection
-        credentials = BasicAuthentication('', self.pat)
-        self.connection = Connection(
-            base_url=f"{self.base_url}/{self.organization}",
-            creds=credentials
-        )
-        
-        # Get work item tracking client
-        self.wit_client: WorkItemTrackingClient = self.connection.clients.get_work_item_tracking_client()
+        self.base_url = f"https://dev.azure.com/{self.organization}"
 
-    def _parse_requirement_id(self, requirement_id: str) -> int:
-        """Parse numeric ID from string requirement ID"""
-        import re
-        numeric_match = re.search(r'\d+', str(requirement_id))
-        if numeric_match:
-            return int(numeric_match.group())
-        else:
-            raise ValueError(f"Could not extract numeric ID from '{requirement_id}'")
-    
+        try:
+            print("[DEBUG] Initializing work item tracking client...")
+            # Create credentials
+            credentials = BasicAuthentication('', self.pat)
+
+            # Create work item tracking client directly
+            self.wit_client = WorkItemTrackingClient(
+                base_url=self.base_url,
+                creds=credentials
+            )
+            print("[DEBUG] Work item tracking client created successfully")
+        except Exception as e:
+            raise Exception(f"Failed to establish connection to Azure DevOps: {str(e)}")
+
     def get_requirements(self, state_filter: Optional[str] = None) -> List[Requirement]:
         """Get all requirements from the project"""
         try:
@@ -87,66 +81,98 @@ class ADOClient:
             raise Exception(f"Failed to get requirements: {str(e)}")
     
     def get_requirement_by_id(self, requirement_id: str) -> Optional[Requirement]:
-        """Get a specific requirement by ID (can be int or string)"""
+        """Get a single requirement by numeric ID or by title if not numeric"""
         try:
-            numeric_id = self._parse_requirement_id(requirement_id)
-            work_item = self.wit_client.get_work_item(
-                id=numeric_id,
-                fields=["System.Id", "System.Title", "System.Description", "System.State"]
-            )
-            
-            if not work_item:
-                return None
-            
-            fields = work_item.fields
-            return Requirement(
-                id=work_item.id,
-                title=fields.get("System.Title", ""),
-                description=fields.get("System.Description", ""),
-                state=fields.get("System.State", ""),
-                url=work_item.url
-            )
-            
+            # Try numeric lookup first
+            try:
+                numeric_id = int(requirement_id)
+                work_item = self.wit_client.get_work_item(id=numeric_id)
+                if not work_item:
+                    print(f"[ERROR] No work item found for ID: {requirement_id}")
+                    return None
+                return Requirement.from_ado_work_item(work_item)
+            except ValueError:
+                # Not a numeric ID, search by title
+                print(f"[INFO] Requirement ID '{requirement_id}' is not numeric. Searching by title...")
+                wiql_query = f"""
+                SELECT [System.Id], [System.Title], [System.Description], [System.State]
+                FROM WorkItems
+                WHERE [System.Title] = '{requirement_id}'
+                AND [System.TeamProject] = '{self.project}'
+                """
+                wiql_result = self.wit_client.query_by_wiql({"query": wiql_query})
+                if not wiql_result.work_items:
+                    print(f"[ERROR] No work item found with title: {requirement_id}")
+                    return None
+                work_item_id = wiql_result.work_items[0].id
+                work_item = self.wit_client.get_work_item(id=work_item_id)
+                if not work_item:
+                    print(f"[ERROR] No work item found for ID: {work_item_id}")
+                    return None
+                return Requirement.from_ado_work_item(work_item)
         except Exception as e:
-            raise Exception(f"Failed to get requirement {requirement_id}: {str(e)}")
-    
+            print(f"[AUTH/ADO ERROR] Failed to fetch requirement '{requirement_id}': {e}.\n"
+                  f"Check if your PAT is valid, has correct permissions, and if the organization/project/ID are correct.")
+            return None
+
     def create_user_story(self, story_data: Dict[str, Any], parent_requirement_id: int) -> int:
         """Create a user story and link it to a parent requirement"""
         try:
-            # Prepare work item data
-            document = []
-            
-            # Add fields
-            for field, value in story_data.items():
-                document.append({
+            print(f"[DEBUG] Attempting to create user story for parent {parent_requirement_id}")
+            # Prepare work item data - ensure we're using System.Title and System.Description
+            document = [
+                {
                     "op": "add",
-                    "path": f"/fields/{field}",
-                    "value": value
-                })
-            
-            # Set work item type
-            document.append({
-                "op": "add", 
-                "path": "/fields/System.WorkItemType",
-                "value": Settings.USER_STORY_TYPE
-            })
-            
+                    "path": "/fields/System.Title",
+                    "value": story_data.get("System.Title", "New User Story")
+                },
+                {
+                    "op": "add",
+                    "path": "/fields/System.Description",
+                    "value": story_data.get("System.Description", "")
+                }
+            ]
+
+            # Add any additional fields from story_data
+            for field, value in story_data.items():
+                if field not in ["System.Title", "System.Description"]:
+                    document.append({
+                        "op": "add",
+                        "path": f"/fields/{field}",
+                        "value": value
+                    })
+
+            print(f"[DEBUG] Document prepared for Azure DevOps: {document}")
+
             # Create the work item
-            work_item = self.wit_client.create_work_item(
-                document=document,
-                project=self.project,
-                type=Settings.USER_STORY_TYPE
-            )
-            
-            # Create parent-child relationship
+            try:
+                work_item = self.wit_client.create_work_item(
+                    document=document,
+                    project=self.project,
+                    type=Settings.USER_STORY_TYPE
+                )
+                print(f"[DEBUG] Successfully created work item with ID: {work_item.id}")
+            except Exception as e:
+                print(f"[ERROR] Failed to create work item: {str(e)}")
+                print(f"[DEBUG] Project: {self.project}")
+                print(f"[DEBUG] Type: {Settings.USER_STORY_TYPE}")
+                raise Exception(f"Failed to create work item: {str(e)}")
+
+            # Create parent-child relationship if parent_requirement_id is provided
             if parent_requirement_id:
-                self._create_parent_child_link(parent_requirement_id, work_item.id)
-            
+                try:
+                    print(f"[DEBUG] Creating parent-child link between {parent_requirement_id} and {work_item.id}")
+                    self._create_parent_child_link(parent_requirement_id, work_item.id)
+                except Exception as e:
+                    print(f"[WARNING] Failed to create parent-child link: {str(e)}")
+                    # Don't raise here, as the story was created successfully
+
             return work_item.id
             
         except Exception as e:
-            raise Exception(f"Failed to create user story: {str(e)}")
-    
+            print(f"[ERROR] Error in create_user_story: {str(e)}")
+            raise
+
     def _create_parent_child_link(self, parent_id: int, child_id: int):
         """Create a parent-child relationship between work items"""
         try:

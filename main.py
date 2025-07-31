@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""
-ADO Story Extraction Agent
-Main CLI interface for processing requirements and extracting user stories
-"""
+
+print("[STARTUP] Program starting...")
 
 import argparse
 import sys
-import json
-from typing import Optional
-
 from src.agent import StoryExtractionAgent
 from config.settings import Settings
 
+print("[STARTUP] Settings and Agent imported")
+
 def main():
+    print("[MAIN] Entering main function")
     parser = argparse.ArgumentParser(description="Extract user stories from ADO requirements using AI")
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
@@ -20,8 +18,8 @@ def main():
     # Process single requirement
     process_cmd = subparsers.add_parser('process', help='Process a single requirement')
     process_cmd.add_argument('requirement_id', type=str, help='ID of the requirement to process (can be string or int)')
-    process_cmd.add_argument('--no-upload', action='store_true', help='Extract stories but do not upload to ADO')
-    
+    process_cmd.add_argument('--no-upload', action='store_true', help='Do not upload extracted stories to ADO')
+
     # Process all requirements
     process_all_cmd = subparsers.add_parser('process-all', help='Process all requirements')
     process_all_cmd.add_argument('--state', type=str, help='Filter requirements by state (e.g., "Active", "New")')
@@ -52,21 +50,21 @@ def main():
         return
     
     try:
+        print(f"[DEBUG] Starting command: {args.command}")
         if args.command == 'validate-config':
             validate_config()
             return
         
-        # Initialize agent
+        # Initialize agent for all commands except validate-config
         agent = StoryExtractionAgent()
-        
+
         if args.command == 'process':
+            print(f"[DEBUG] Processing requirement ID: {args.requirement_id}")
             result = agent.process_requirement_by_id(
                 args.requirement_id, 
                 upload_to_ado=not args.no_upload
             )
-            # Always print result, even if extraction failed
-            print(f"\n[RESULT] Requirement ID: {result.requirement_id}")
-            print(f"Title: {getattr(result, 'requirement_title', '')}")
+            print(f"\n[RESULT] Processing completed for requirement ID: {args.requirement_id}")
             print(f"Extraction Successful: {getattr(result, 'extraction_successful', False)}")
             if getattr(result, 'error_message', None):
                 print(f"Error: {result.error_message}")
@@ -74,11 +72,6 @@ def main():
                 print(f"Stories Extracted: {len(result.stories)}")
                 for i, story in enumerate(result.stories, 1):
                     print(f"  Story {i}: {getattr(story, 'heading', '')}")
-                    print(f"    Description: {getattr(story, 'description', '')}")
-                    if hasattr(story, 'acceptance_criteria') and story.acceptance_criteria:
-                        print("    Acceptance Criteria:")
-                        for j, criteria in enumerate(story.acceptance_criteria, 1):
-                            print(f"      {j}. {criteria}")
             else:
                 print("No stories extracted.")
             return

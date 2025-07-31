@@ -261,6 +261,8 @@ class EpicChangeMonitor:
         
         while self.is_running:
             try:
+                # Auto-detect new Epics at the start of each cycle
+                self.update_monitored_epics()
                 # Check each monitored EPIC
                 sync_tasks = []
                 
@@ -277,12 +279,10 @@ class EpicChangeMonitor:
                         if self._check_epic_changes(epic_id):
                             if self.config.auto_sync:
                                 # Schedule sync
-                                sync_task = asyncio.create_task(
-                                    asyncio.get_event_loop().run_in_executor(
-                                        self.executor, self._sync_epic, epic_id
-                                    )
+                                future = asyncio.get_event_loop().run_in_executor(
+                                    self.executor, self._sync_epic, epic_id
                                 )
-                                sync_tasks.append((epic_id, sync_task))
+                                sync_tasks.append((epic_id, future))
                             else:
                                 self.logger.info(f"Changes detected in EPIC {epic_id}, but auto-sync is disabled")
                         
@@ -291,24 +291,53 @@ class EpicChangeMonitor:
                         
                     except Exception as e:
                         self.logger.error(f"Error processing EPIC {epic_id}: {e}")
-                
+                        import traceback
+                        self.logger.error(traceback.format_exc())
+
                 # Wait for sync tasks to complete
                 if sync_tasks:
                     self.logger.info(f"Running {len(sync_tasks)} synchronization tasks")
-                    for epic_id, task in sync_tasks:
+                    for epic_id, future in sync_tasks:
                         try:
-                            await task
+                            await future
                         except Exception as e:
                             self.logger.error(f"Sync task failed for EPIC {epic_id}: {e}")
-                
+                            import traceback
+                            self.logger.error(traceback.format_exc())
+
                 # Wait before next polling cycle
                 self.logger.debug(f"Monitoring cycle complete, sleeping for {self.config.poll_interval_seconds} seconds")
                 await asyncio.sleep(self.config.poll_interval_seconds)
                 
             except Exception as e:
                 self.logger.error(f"Error in monitoring loop: {e}")
+                import traceback
+                self.logger.error(traceback.format_exc())
                 await asyncio.sleep(60)  # Wait a minute before retrying
     
+    def fetch_all_epic_ids(self) -> List[str]:
+        """Fetch all Epic IDs from Azure DevOps."""
+        try:
+            requirements = self.agent.ado_client.get_requirements()
+            return [str(req.id) for req in requirements]
+        except Exception as e:
+            self.logger.error(f"Failed to fetch all Epics: {e}")
+            return []
+
+    def update_monitored_epics(self):
+        """Update the monitored Epics set by auto-detecting new Epics."""
+        all_epic_ids = set(self.fetch_all_epic_ids())
+        current_epic_ids = set(self.monitored_epics.keys())
+        new_epics = all_epic_ids - current_epic_ids
+        for epic_id in new_epics:
+            self.logger.info(f"Auto-detect: Adding new Epic {epic_id} to monitoring.")
+            self.add_epic(epic_id)
+        # Optionally, remove Epics that no longer exist in ADO
+        # removed_epics = current_epic_ids - all_epic_ids
+        # for epic_id in removed_epics:
+        #     self.logger.info(f"Auto-detect: Removing Epic {epic_id} (no longer exists in ADO).")
+        #     self.monitored_epics.pop(epic_id, None)
+
     def start(self):
         """Start the monitoring service"""
         if self.is_running:

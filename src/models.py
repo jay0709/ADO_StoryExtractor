@@ -30,6 +30,18 @@ class Requirement(BaseModel):
     state: str
     url: Optional[str] = None
     
+    @staticmethod
+    def from_ado_work_item(work_item: Any) -> "Requirement":
+        """Create a Requirement instance from an Azure DevOps work item object."""
+        fields = getattr(work_item, 'fields', {})
+        return Requirement(
+            id=getattr(work_item, 'id', 0),
+            title=fields.get("System.Title", ""),
+            description=fields.get("System.Description", ""),
+            state=fields.get("System.State", ""),
+            url=getattr(work_item, 'url', None)
+        )
+
 class StoryExtractionResult(BaseModel):
     """Result of story extraction from a requirement"""
     requirement_id: str  # Changed to str to handle both numeric and text IDs
