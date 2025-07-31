@@ -180,7 +180,7 @@ class EpicChangeMonitor:
                     self.logger.info(f"  Current hash:  {current_hash[:16]}...")
                     return True
                 else:
-                    self.logger.debug(f"No changes detected in EPIC {epic_id}")
+                    self.logger.info(f"No changes detected in EPIC {epic_id}")
                     return False
             else:
                 # First check, save current snapshot
