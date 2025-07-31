@@ -1,0 +1,13 @@
+{
+  "poll_interval_seconds": 30,
+  "max_concurrent_syncs": 3,
+  "snapshot_directory": "snapshots",
+  "log_level": "INFO",
+  "epic_ids": [
+    "1"
+  ],
+  "auto_sync": true,
+  "notification_webhook": null,
+  "retry_attempts": 3,
+  "retry_delay_seconds": 60
+}
