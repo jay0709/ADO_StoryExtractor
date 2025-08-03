@@ -383,10 +383,6 @@ class EpicChangeMonitor:
         self.logger.info(f"Auto-sync enabled: {self.config.auto_sync}")
         self.logger.info(f"Auto-extract new epics: {self.config.auto_extract_new_epics}")
         
-        # Setup signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
         # Run the monitoring loop
         try:
             asyncio.run(self._monitor_loop())
