@@ -4,12 +4,15 @@
 
 A **Python-based Azure DevOps (ADO) Story Extractor** that uses AI to automatically extract user stories from requirements/epics and manage them in Azure DevOps. The system provides intelligent monitoring, change detection, and synchronization capabilities with both CLI and API interfaces.
 
-### 🎯 Key Features
+## 🎯 Key Features
 
 - **AI-Powered Extraction**: Uses OpenAI GPT to analyze requirements and generate user stories
 - **Change Detection**: Monitors epics using content hashing for automatic updates
 - **Automatic Synchronization**: Creates, updates, and manages user stories in ADO
 - **Snapshot Tracking**: Maintains history for change detection and rollback
+- **Persistent State Management**: Tracks processed epics to prevent duplicate extractions
+- **Graceful Shutdown**: Saves snapshots before shutdown and resumes from last state
+- **Smart Epic Processing**: Skips unchanged epics and prevents re-extraction of existing stories
 - **REST API**: Provides API endpoints for integration with other systems
 - **Comprehensive CLI**: Multiple interfaces for different use cases
 - **Background Monitoring**: Continuous epic monitoring with configurable polling
@@ -31,6 +34,7 @@ ado-story-extractor/
 ├── tests/                 # Test suite
 ├── snapshots/             # Epic snapshots for change detection
 ├── logs/                  # Application logs
+├── monitor_state.json     # Persistent state tracking for processed epics
 ├── main.py               # Basic CLI interface
 ├── main_enhanced.py      # Enhanced CLI with epic sync
 ├── monitor_daemon.py     # Monitoring daemon runner
@@ -250,6 +254,9 @@ pytest tests/test_story_extractor.py
 3. **Change Triggering**: Automatic re-extraction when changes detected
 4. **Smart Synchronization**: Updates existing stories or creates new ones
 5. **Continuous Monitoring**: Background service polls for changes
+6. **Graceful Shutdown**: Saves all snapshots before stopping
+7. **Persistent State**: Tracks processed epics to prevent duplicate extractions
+8. **Resume Capability**: Continues monitoring from last known state after restart
 
 ### Story Synchronization Logic
 - **New Stories**: Creates fresh work items in ADO
@@ -300,9 +307,18 @@ pytest tests/test_story_extractor.py
 4. Use API mode for integration with other tools
 5. Set up proper logging and alerting
 
-## Daemon Enhancement: Auto-Extract Stories from New Epics
+## Daemon Enhancement: Smart State Management and Snapshot Handling
 
-The Enhanced ADO Story Extractor daemon now automatically extracts user stories from newly detected epics while maintaining the existing change detection functionality.
+The Enhanced ADO Story Extractor daemon now includes sophisticated state management that prevents duplicate story extractions and ensures reliable operation across restarts.
+
+### 🆕 **LATEST**: Persistent State Management
+- **Snapshot on Shutdown**: Automatically saves all epic snapshots before stopping
+- **State Persistence**: Tracks which epics have been processed to prevent re-extraction
+- **Resume from Last State**: Continues monitoring exactly where it left off after restart
+- **Skip Unchanged Epics**: Only processes epics that have actual content changes
+- **Duplicate Prevention**: Never re-extracts stories for epics that already have them
+
+### 🔥 **ENHANCED**: Auto-Extract Stories from New Epics
 
 ## Features
 

@@ -44,6 +44,7 @@ class EpicMonitorState:
     last_snapshot: Optional[Dict] = None
     consecutive_errors: int = 0
     last_sync_result: Optional[Dict] = None
+    stories_extracted: bool = False  # Track if stories have been extracted for this epic
 
 
 class EpicChangeMonitor:
@@ -60,6 +61,10 @@ class EpicChangeMonitor:
         self.snapshot_dir.mkdir(exist_ok=True)
         # ThreadPoolExecutor for async syncs
         self.snapshot_dir.mkdir(exist_ok=True)
+        
+        # State file to track which epics have been processed
+        self.state_file = Path("monitor_state.json")
+        self.processed_epics = self._load_processed_epics()
 
         # Load existing snapshots
         self._load_existing_snapshots()
@@ -83,6 +88,29 @@ class EpicChangeMonitor:
             file_handler.setFormatter(console_formatter)
             logger.addHandler(file_handler)
         return logger
+    
+    def _load_processed_epics(self) -> Set[str]:
+        """Load the set of epics that have already been processed (had stories extracted)"""
+        try:
+            if self.state_file.exists():
+                with open(self.state_file, 'r') as f:
+                    state_data = json.load(f)
+                return set(state_data.get('processed_epics', []))
+        except Exception as e:
+            self.logger.error(f"Failed to load processed epics state: {e}")
+        return set()
+    
+    def _save_processed_epics(self):
+        """Save the set of processed epics to state file"""
+        try:
+            state_data = {
+                'processed_epics': list(self.processed_epics),
+                'last_updated': datetime.now().isoformat()
+            }
+            with open(self.state_file, 'w') as f:
+                json.dump(state_data, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Failed to save processed epics state: {e}")
 
     def _load_existing_snapshots(self):
         for epic_id in self.config.epic_ids or []:
@@ -95,19 +123,22 @@ class EpicChangeMonitor:
                     self.monitored_epics[epic_id] = EpicMonitorState(
                         epic_id=epic_id,
                         last_check=datetime.now(),
-                        last_snapshot=snapshot_data
+                        last_snapshot=snapshot_data,
+                        stories_extracted=epic_id in self.processed_epics
                     )
                     self.logger.info(f"Loaded existing snapshot for EPIC {epic_id}")
                 except Exception as e:
                     self.logger.error(f"Failed to load snapshot for EPIC {epic_id}: {e}")
                     self.monitored_epics[epic_id] = EpicMonitorState(
                         epic_id=epic_id,
-                        last_check=datetime.now()
+                        last_check=datetime.now(),
+                        stories_extracted=epic_id in self.processed_epics
                     )
             else:
                 self.monitored_epics[epic_id] = EpicMonitorState(
                     epic_id=epic_id,
-                    last_check=datetime.now()
+                    last_check=datetime.now(),
+                    stories_extracted=epic_id in self.processed_epics
                 )
     
     def add_epic(self, epic_id: str) -> bool:
@@ -233,6 +264,12 @@ class EpicChangeMonitor:
                         epic_state.last_snapshot = new_snapshot
                         self._save_snapshot(epic_id, new_snapshot)
                     
+                    # Mark epic as processed if stories were created
+                    if len(result.created_stories) > 0:
+                        self.processed_epics.add(epic_id)
+                        epic_state.stories_extracted = True
+                        self._save_processed_epics()
+                    
                     # Store sync result
                     epic_state.last_sync_result = {
                         'timestamp': datetime.now().isoformat(),
@@ -351,17 +388,26 @@ class EpicChangeMonitor:
         for epic_id in new_epics:
             self.logger.info(f"Auto-detect: Adding new Epic {epic_id} to monitoring.")
             added_successfully = self.add_epic(epic_id)
-            if added_successfully and self.config.auto_extract_new_epics:
+            
+            # Only extract stories if this epic hasn't been processed before
+            if added_successfully and self.config.auto_extract_new_epics and epic_id not in self.processed_epics:
                 self.logger.info(f"Auto-extraction enabled: Extracting stories for new Epic {epic_id}.")
                 try:
                     extraction_result = self.agent.synchronize_epic(epic_id)
                     if extraction_result.sync_successful:
+                        # Mark epic as processed
+                        self.processed_epics.add(epic_id)
+                        self.monitored_epics[epic_id].stories_extracted = True
+                        self._save_processed_epics()
+                        
                         self.logger.info(f"Successfully extracted and synchronized {len(extraction_result.created_stories)} stories for new Epic {epic_id}.")
                         self.logger.info(f"  Story IDs: {extraction_result.created_stories}")
                     else:
                         self.logger.error(f"Failed to extract and synchronize stories for new Epic {epic_id}: {extraction_result.error_message}")
                 except Exception as e:
                     self.logger.error(f"Exception during extraction for new Epic {epic_id}: {e}")
+            elif added_successfully and epic_id in self.processed_epics:
+                self.logger.info(f"Epic {epic_id} has already been processed. Skipping story extraction.")
             elif added_successfully:
                 self.logger.info(f"Auto-extraction disabled: Skipping story extraction for new Epic {epic_id}. Only monitoring for changes.")
         # Optionally, remove Epics that no longer exist in ADO
@@ -395,7 +441,16 @@ class EpicChangeMonitor:
         """Stop the monitoring service"""
         if not self.is_running:
             return
+
+        # Capture snapshots before stopping
+        self.logger.info("Saving snapshots before shutdown")
+        for epic_id, state in self.monitored_epics.items():
+            if state.last_snapshot:
+                self._save_snapshot(epic_id, state.last_snapshot)
         
+        # Save processed epics state
+        self._save_processed_epics()
+
         self.logger.info("Stopping EPIC Change Monitor")
         self.is_running = False
         self.executor.shutdown(wait=True)
