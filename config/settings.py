@@ -21,7 +21,11 @@ class Settings:
     # OpenAI settings
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     OPENAI_MAX_RETRIES = int(os.getenv('OPENAI_MAX_RETRIES', 3))
-    OPENAI_RETRY_DELAY = int(os.getenv('OPENAI_RETRY_DELAY', 5))
+    try:
+        OPENAI_RETRY_DELAY = int(os.getenv('OPENAI_RETRY_DELAY', 5))
+    except Exception:
+        OPENAI_RETRY_DELAY = 5
+    print(f"[CONFIG] OPENAI_RETRY_DELAY: {OPENAI_RETRY_DELAY}")
 
     @classmethod
     def validate(cls):

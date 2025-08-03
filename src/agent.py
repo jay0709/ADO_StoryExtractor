@@ -14,16 +14,12 @@ class StoryExtractionAgent:
         self.logger = self._setup_logger()
     
     def process_requirement_by_id(self, requirement_id: str, upload_to_ado: bool = True) -> StoryExtractionResult:
-        """Process a single requirement by ID (now supports string IDs)"""
+        """Process a single requirement by ID or title (string or int)"""
         print(f"\n[AGENT] Starting to process requirement ID: {requirement_id}")
         try:
-            # Accept string-based IDs (e.g., 'EPIC 1')
-            ado_id = requirement_id.strip()
-            print(f"[AGENT] Using requirement ID: {ado_id}")
-
-            # Get requirement from ADO
+            # Try to fetch requirement by ID or title (string or int)
             print("[AGENT] Fetching requirement from Azure DevOps...")
-            requirement = self.ado_client.get_requirement_by_id(ado_id)
+            requirement = self.ado_client.get_requirement_by_id(requirement_id)
 
             if not requirement:
                 error_msg = f"Requirement {requirement_id} not found or access denied"
@@ -59,44 +55,24 @@ class StoryExtractionAgent:
                     result.error_message = f"Failed to upload stories: {str(e)}"
                     result.extraction_successful = False
 
-            return result
-            
         except Exception as e:
-            error_msg = f"Failed to process requirement {requirement_id}: {str(e)}"
-            print(f"[ERROR] StoryExtractionAgent: {error_msg}")
-            return StoryExtractionResult(
-                requirement_id=requirement_id,
-                requirement_title="",
-                stories=[],
-                extraction_successful=False,
-                error_message=error_msg
-            )
-    
-    def process_all_requirements(self, state_filter: Optional[str] = None, upload_to_ado: bool = True) -> List[StoryExtractionResult]:
-        """Process all requirements in the project"""
-        self.logger.info(f"Processing all requirements with state filter: {state_filter}")
-        
-        try:
-            # Get all requirements
-            requirements = self.ado_client.get_requirements(state_filter)
-            self.logger.info(f"Found {len(requirements)} requirements to process")
-            
-            results = []
-            for requirement in requirements:
+            # Accept string-based IDs (e.g., 'EPIC 1')
+            ado_id = requirement_id.strip()
+            print(f"[AGENT] Using requirement ID: {ado_id}")
+            try:
+                # Get all requirements
+                requirement = self.ado_client.get_requirement_by_id(ado_id)
+                self.logger.info(f"Found requirement to process: {ado_id}")
                 result = self.process_requirement_by_id(str(requirement.id), upload_to_ado)
-                results.append(result)
-            
-            # Summary
-            successful = len([r for r in results if r.extraction_successful])
-            total_stories = sum(len(r.stories) for r in results)
-            self.logger.info(f"Processing complete: {successful}/{len(results)} requirements processed successfully, {total_stories} total stories extracted")
-            
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"Failed to process requirements: {str(e)}")
-            raise
-    
+                # Summary
+                successful = 1 if result.extraction_successful else 0
+                total_stories = len(result.stories)
+                print(f"[SUMMARY] Processed 1 requirement. Successful: {successful}, Total stories: {total_stories}")
+                return [result]
+            except Exception as inner_e:
+                print(f"[ERROR] Failed to process requirement {ado_id}: {str(inner_e)}")
+                return []
+
     def preview_stories(self, requirement_id: str) -> StoryExtractionResult:
         """Extract and preview stories without uploading to ADO"""
         return self.process_requirement_by_id(requirement_id, upload_to_ado=False)
@@ -145,99 +121,69 @@ class StoryExtractionAgent:
         except Exception as e:
             return {"error": str(e)}
     
-    def synchronize_epic(self, epic_id: str, stored_snapshot: Optional[Dict[str, str]] = None) -> EpicSyncResult:
+    def synchronize_epic(self, epic_id: str, stored_snapshot: Optional[Dict] = None) -> EpicSyncResult:
         """Detect changes in an EPIC and synchronize its tasks"""
+        self.logger.info(f"[AGENT] Synchronizing Epic: {epic_id}")
         try:
-            self.logger.info(f"Synchronizing EPIC {epic_id}")
-            
-            numeric_epic_id = epic_id  # No numeric parsing
-
-            # Get current EPIC state
-            current_epic = self.ado_client.get_requirement_by_id(epic_id)
-            if not current_epic:
-                raise Exception(f"EPIC {epic_id} not found")
-            
-            # Get current snapshot for change detection
-            current_snapshot = self.ado_client.detect_changes_in_epic(numeric_epic_id)
-            existing_stories = self.ado_client.get_existing_user_stories(numeric_epic_id)
-            
-            self.logger.info(f"Found {len(existing_stories)} existing user stories for EPIC {epic_id}")
-            
-            # Check if changes detected (compare with stored snapshot if provided)
-            has_changes = True  # Always extract stories for now, can be refined later
-            changes_detected = []
-            
-            if stored_snapshot and current_snapshot:
-                stored_hash = stored_snapshot.get('content_hash', '')
-                if stored_hash == current_snapshot.content_hash:
-                    has_changes = False
-                    self.logger.info(f"No content changes detected for EPIC {epic_id}")
-                else:
-                    changes_detected.append("EPIC content has been modified")
-                    self.logger.info(f"Content changes detected for EPIC {epic_id}")
-            else:
-                changes_detected.append("Initial sync or no previous snapshot available")
-            
-            sync_result = EpicSyncResult(
-                epic_id=epic_id,
-                epic_title=current_epic.title
-            )
-            
-            if has_changes:
-                # Extract new stories from the updated EPIC
-                story_extraction_result = self.story_extractor.extract_stories(current_epic)
-                
-                if not story_extraction_result.extraction_successful:
-                    raise Exception(f"Story extraction failed: {story_extraction_result.error_message}")
-                
-                new_stories = story_extraction_result.stories
-                self.logger.info(f"Extracted {len(new_stories)} stories from updated EPIC")
-                
-                # Determine which stories to create, update, or leave unchanged
-                stories_to_create, stories_to_update, unchanged_stories = self._analyze_story_changes(
-                    existing_stories, new_stories
+            # Fetch the requirement (Epic) from ADO
+            requirement = self.ado_client.get_requirement_by_id(epic_id)
+            if not requirement:
+                error_msg = f"[AGENT] Epic {epic_id} not found or access denied"
+                self.logger.error(error_msg)
+                return EpicSyncResult(
+                    epic_id=epic_id,
+                    epic_title="",
+                    sync_successful=False,
+                    error_message=error_msg
                 )
-                
-                self.logger.info(f"Analysis: {len(stories_to_create)} to create, {len(stories_to_update)} to update, {len(unchanged_stories)} unchanged")
-                
-                # Create new stories
-                created_ids = []
-                for story in stories_to_create:
+            self.logger.info(f"[AGENT] Fetched Epic: {requirement.title}")
+            self.logger.info(f"[AGENT] Epic Description: {requirement.description}")
+            # Extract stories
+            self.logger.info(f"[AGENT] Extracting stories from Epic {epic_id}")
+            extraction_result = self.story_extractor.extract_stories(requirement)
+            if not extraction_result.extraction_successful:
+                self.logger.error(f"[AGENT] Story extraction failed: {extraction_result.error_message}")
+                return EpicSyncResult(
+                    epic_id=epic_id,
+                    epic_title=requirement.title,
+                    sync_successful=False,
+                    error_message=extraction_result.error_message
+                )
+            self.logger.info(f"[AGENT] Extracted {len(extraction_result.stories)} stories from Epic {epic_id}")
+            # Upload stories to ADO
+            created_stories = []
+            updated_stories = []
+            unchanged_stories = []
+            if extraction_result.stories:
+                self.logger.info(f"[AGENT] Uploading {len(extraction_result.stories)} stories to ADO for Epic {epic_id}")
+                for story in extraction_result.stories:
+                    # TODO: Replace the following with actual upload logic that returns the new story's integer ID
+                    # Example: story_id = self.ado_client.create_story(story)
+                    story_id = None  # Placeholder for the created story's ID
                     try:
-                        story_data = story.to_ado_format()
-                        story_id = self.ado_client.create_user_story(story_data, numeric_epic_id)
-                        created_ids.append(story_id)
-                        self.logger.info(f"Created new user story {story_id}: {story.heading}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to create story '{story.heading}': {str(e)}")
+                        # Replace with actual upload logic and get the ID
+                        story_id = self.ado_client.create_story(story)  # This should return an int ID
+                    except Exception as upload_exc:
+                        self.logger.error(f"[AGENT] Failed to upload story '{story.heading}': {upload_exc}")
                         continue
-                
-                # Update existing stories
-                updated_ids = []
-                for story_update in stories_to_update:
-                    try:
-                        story_id = story_update['id']
-                        new_story = story_update['new_story']
-                        self._update_user_story(story_id, new_story)
-                        updated_ids.append(story_id)
-                        self.logger.info(f"Updated user story {story_id}: {new_story.heading}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to update story {story_update['id']}: {str(e)}")
-                        continue
-                
-                sync_result.created_stories = created_ids
-                sync_result.updated_stories = updated_ids
-                sync_result.unchanged_stories = [s.id for s in unchanged_stories]
-                
-                self.logger.info(f"EPIC sync completed: {len(created_ids)} created, {len(updated_ids)} updated, {len(unchanged_stories)} unchanged")
+                    if isinstance(story_id, int):
+                        created_stories.append(story_id)
+                    else:
+                        self.logger.error(f"[AGENT] Story upload did not return a valid integer ID for '{story.heading}'")
             else:
-                sync_result.unchanged_stories = [s.id for s in existing_stories]
-                self.logger.info(f"No changes detected, {len(existing_stories)} stories remain unchanged")
-            
-            return sync_result
-            
+                self.logger.info(f"[AGENT] No stories extracted for Epic {epic_id}")
+            return EpicSyncResult(
+                epic_id=epic_id,
+                epic_title=requirement.title,
+                sync_successful=True,
+                created_stories=created_stories,
+                updated_stories=updated_stories,
+                unchanged_stories=unchanged_stories
+            )
         except Exception as e:
-            self.logger.error(f"EPIC synchronization failed for {epic_id}: {str(e)}")
+            self.logger.error(f"[AGENT] Exception during Epic sync: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return EpicSyncResult(
                 epic_id=epic_id,
                 epic_title="",

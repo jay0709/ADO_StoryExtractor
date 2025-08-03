@@ -1,6 +1,9 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
+import os
+
+OPENAI_RETRY_DELAY = int(os.getenv('OPENAI_RETRY_DELAY', 5))
 
 class UserStory(BaseModel):
     """Model representing a user story extracted from a requirement"""
@@ -24,23 +27,23 @@ class UserStory(BaseModel):
 
 class Requirement(BaseModel):
     """Model representing an ADO requirement"""
-    id: int
+    id: str  # Changed from int to str
     title: str
     description: str
     state: str
     url: Optional[str] = None
-    
     @staticmethod
     def from_ado_work_item(work_item: Any) -> "Requirement":
         """Create a Requirement instance from an Azure DevOps work item object."""
         fields = getattr(work_item, 'fields', {})
         return Requirement(
-            id=getattr(work_item, 'id', 0),
+            id=str(getattr(work_item, 'id', '')),
             title=fields.get("System.Title", ""),
             description=fields.get("System.Description", ""),
             state=fields.get("System.State", ""),
             url=getattr(work_item, 'url', None)
         )
+
 
 class StoryExtractionResult(BaseModel):
     """Result of story extraction from a requirement"""

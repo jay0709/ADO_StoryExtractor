@@ -12,18 +12,18 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, ClassVar
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor
 
 from src.agent import StoryExtractionAgent
-from src.models import EpicSyncResult, RequirementSnapshot
-from config.settings import Settings
+from src.models import EpicSyncResult
 
 
 @dataclass
 class MonitorConfig:
     """Configuration for the EPIC monitor"""
+    OPENAI_RETRY_DELAY: ClassVar[int] = int(os.getenv('OPENAI_RETRY_DELAY', 5))
     poll_interval_seconds: int = 300  # 5 minutes default
     max_concurrent_syncs: int = 3
     snapshot_directory: str = "snapshots"
@@ -55,11 +55,11 @@ class EpicChangeMonitor:
         self.is_running = False
         self.monitored_epics: Dict[str, EpicMonitorState] = {}
         self.executor = ThreadPoolExecutor(max_workers=config.max_concurrent_syncs)
-        
-        # Ensure snapshot directory exists
         self.snapshot_dir = Path(config.snapshot_directory)
         self.snapshot_dir.mkdir(exist_ok=True)
-        
+        # ThreadPoolExecutor for async syncs
+        self.snapshot_dir.mkdir(exist_ok=True)
+
         # Load existing snapshots
         self._load_existing_snapshots()
     
@@ -67,7 +67,6 @@ class EpicChangeMonitor:
         """Setup logging for the monitor"""
         logger = logging.getLogger("EpicChangeMonitor")
         logger.setLevel(getattr(logging, self.config.log_level.upper()))
-        
         if not logger.handlers:
             # Console handler
             console_handler = logging.StreamHandler()
@@ -76,18 +75,15 @@ class EpicChangeMonitor:
             )
             console_handler.setFormatter(console_formatter)
             logger.addHandler(console_handler)
-            
             # File handler
             log_file = Path("logs") / "epic_monitor.log"
             log_file.parent.mkdir(exist_ok=True)
             file_handler = logging.FileHandler(log_file)
             file_handler.setFormatter(console_formatter)
             logger.addHandler(file_handler)
-        
         return logger
-    
+
     def _load_existing_snapshots(self):
-        """Load existing snapshots for monitored EPICs"""
         for epic_id in self.config.epic_ids or []:
             snapshot_file = self.snapshot_dir / f"epic_{epic_id}.json"
             if snapshot_file.exists():
@@ -114,7 +110,7 @@ class EpicChangeMonitor:
                 )
     
     def add_epic(self, epic_id: str) -> bool:
-        """Add an EPIC to monitoring"""
+        """Add an EPIC to monitoring and trigger immediate check/sync."""
         try:
             if epic_id not in self.monitored_epics:
                 # Get initial snapshot
@@ -123,13 +119,25 @@ class EpicChangeMonitor:
                     self.monitored_epics[epic_id] = EpicMonitorState(
                         epic_id=epic_id,
                         last_check=datetime.now(),
-                        last_snapshot=initial_snapshot
+                        last_snapshot=initial_snapshot,
+                        consecutive_errors=0
                     )
                     self._save_snapshot(epic_id, initial_snapshot)
-                    self.logger.info(f"Added EPIC {epic_id} to monitoring")
+                    self.logger.info(f"Added EPIC {epic_id} to monitoring and will check for changes immediately.")
+                    # Immediately check and sync the new Epic
+                    if self._check_epic_changes(epic_id):
+                        if self.config.auto_sync:
+                            self.logger.info(f"Immediately synchronizing new EPIC {epic_id} after detection.")
+                            self._sync_epic(epic_id)
                     return True
                 else:
-                    self.logger.error(f"Failed to get initial snapshot for EPIC {epic_id}")
+                    self.monitored_epics[epic_id] = EpicMonitorState(
+                        epic_id=epic_id,
+                        last_check=datetime.now(),
+                        last_snapshot=None,
+                        consecutive_errors=1
+                    )
+                    self.logger.warning(f"Added EPIC {epic_id} to monitoring, but could not fetch initial snapshot. Will retry.")
                     return False
             else:
                 self.logger.warning(f"EPIC {epic_id} is already being monitored")
@@ -156,14 +164,17 @@ class EpicChangeMonitor:
             self.logger.error(f"Failed to save snapshot for EPIC {epic_id}: {e}")
     
     def _check_epic_changes(self, epic_id: str) -> bool:
-        """Check if an EPIC has changes"""
+        """Check if an EPIC has changes. Remove from monitoring if undetectable for 3 retries."""
         try:
             epic_state = self.monitored_epics[epic_id]
             current_snapshot = self.agent.get_epic_snapshot(epic_id)
             
             if not current_snapshot:
-                self.logger.warning(f"Failed to get current snapshot for EPIC {epic_id}")
                 epic_state.consecutive_errors += 1
+                self.logger.warning(f"Failed to get current snapshot for EPIC {epic_id} (consecutive errors: {epic_state.consecutive_errors})")
+                if epic_state.consecutive_errors >= 3:
+                    self.logger.error(f"EPIC {epic_id} could not be detected after 3 retries. Removing from monitoring.")
+                    self.remove_epic(epic_id)
                 return False
             
             # Reset error counter on successful snapshot
@@ -178,20 +189,27 @@ class EpicChangeMonitor:
                     self.logger.info(f"Changes detected in EPIC {epic_id}")
                     self.logger.info(f"  Previous hash: {last_hash[:16]}...")
                     self.logger.info(f"  Current hash:  {current_hash[:16]}...")
+                    # Update snapshot for next check
+                    epic_state.last_snapshot = current_snapshot
+                    self._save_snapshot(epic_id, current_snapshot)
                     return True
                 else:
                     self.logger.info(f"No changes detected in EPIC {epic_id}")
                     return False
             else:
                 # First check, save current snapshot
-                self.logger.info(f"Initial snapshot saved for EPIC {epic_id}")
+                self.logger.info(f"Initial snapshot saved for EPIC {epic_id}. Triggering extraction and sync.")
                 epic_state.last_snapshot = current_snapshot
                 self._save_snapshot(epic_id, current_snapshot)
-                return False
-                
+                return True  # Always treat as change to trigger sync for new Epics
+
         except Exception as e:
             self.logger.error(f"Error checking changes for EPIC {epic_id}: {e}")
-            self.monitored_epics[epic_id].consecutive_errors += 1
+            if epic_id in self.monitored_epics:
+                self.monitored_epics[epic_id].consecutive_errors += 1
+                if self.monitored_epics[epic_id].consecutive_errors >= 3:
+                    self.logger.error(f"EPIC {epic_id} could not be detected after 3 retries. Removing from monitoring.")
+                    self.remove_epic(epic_id)
             return False
     
     def _sync_epic(self, epic_id: str) -> EpicSyncResult:
@@ -316,9 +334,9 @@ class EpicChangeMonitor:
                 await asyncio.sleep(60)  # Wait a minute before retrying
     
     def fetch_all_epic_ids(self) -> List[str]:
-        """Fetch all Epic IDs from Azure DevOps."""
+        """Fetch all Epic IDs from Azure DevOps (filtered by work item type 'Epic')."""
         try:
-            requirements = self.agent.ado_client.get_requirements()
+            requirements = self.agent.ado_client.get_requirements(work_item_type="Epic")
             return [str(req.id) for req in requirements]
         except Exception as e:
             self.logger.error(f"Failed to fetch all Epics: {e}")

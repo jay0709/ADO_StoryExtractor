@@ -34,82 +34,55 @@ class ADOClient:
         except Exception as e:
             raise Exception(f"Failed to establish connection to Azure DevOps: {str(e)}")
 
-    def get_requirements(self, state_filter: Optional[str] = None) -> List[Requirement]:
-        """Get all requirements from the project"""
+    def get_requirements(self, state_filter: Optional[str] = None, work_item_type: Optional[str] = None) -> List[Requirement]:
+        """Get all requirements from the project, optionally filtered by work item type (e.g., 'Epic')."""
         try:
             # Build WIQL query
             wiql_query = f"""
             SELECT [System.Id], [System.Title], [System.Description], [System.State]
             FROM WorkItems
-            WHERE [System.WorkItemType] = '{Settings.REQUIREMENT_TYPE}'
-            AND [System.TeamProject] = '{self.project}'
+            WHERE [System.TeamProject] = '{self.project}'
             """
-            
+            if work_item_type:
+                wiql_query += f" AND [System.WorkItemType] = '{work_item_type}'"
+            else:
+                wiql_query += f" AND [System.WorkItemType] = '{Settings.REQUIREMENT_TYPE}'"
             if state_filter:
                 wiql_query += f" AND [System.State] = '{state_filter}'"
-            
             # Execute query
             wiql_result = self.wit_client.query_by_wiql({"query": wiql_query})
-            
             if not wiql_result.work_items:
                 return []
-            
             # Get work item IDs
             work_item_ids = [item.id for item in wiql_result.work_items]
-            
             # Get full work items
             work_items = self.wit_client.get_work_items(
                 ids=work_item_ids,
                 fields=["System.Id", "System.Title", "System.Description", "System.State"]
             )
-            
             requirements = []
             for item in work_items:
                 fields = item.fields
                 requirement = Requirement(
-                    id=item.id,
+                    id=str(item.id),  # Ensure id is always a string
                     title=fields.get("System.Title", ""),
                     description=fields.get("System.Description", ""),
                     state=fields.get("System.State", ""),
                     url=item.url
                 )
                 requirements.append(requirement)
-            
             return requirements
-            
         except Exception as e:
             raise Exception(f"Failed to get requirements: {str(e)}")
     
     def get_requirement_by_id(self, requirement_id: str) -> Optional[Requirement]:
-        """Get a single requirement by numeric ID or by title if not numeric"""
+        """Get a single requirement by string ID with detailed error messages"""
         try:
-            # Try numeric lookup first
-            try:
-                numeric_id = int(requirement_id)
-                work_item = self.wit_client.get_work_item(id=numeric_id)
-                if not work_item:
-                    print(f"[ERROR] No work item found for ID: {requirement_id}")
-                    return None
-                return Requirement.from_ado_work_item(work_item)
-            except ValueError:
-                # Not a numeric ID, search by title
-                print(f"[INFO] Requirement ID '{requirement_id}' is not numeric. Searching by title...")
-                wiql_query = f"""
-                SELECT [System.Id], [System.Title], [System.Description], [System.State]
-                FROM WorkItems
-                WHERE [System.Title] = '{requirement_id}'
-                AND [System.TeamProject] = '{self.project}'
-                """
-                wiql_result = self.wit_client.query_by_wiql({"query": wiql_query})
-                if not wiql_result.work_items:
-                    print(f"[ERROR] No work item found with title: {requirement_id}")
-                    return None
-                work_item_id = wiql_result.work_items[0].id
-                work_item = self.wit_client.get_work_item(id=work_item_id)
-                if not work_item:
-                    print(f"[ERROR] No work item found for ID: {work_item_id}")
-                    return None
-                return Requirement.from_ado_work_item(work_item)
+            work_item = self.wit_client.get_work_item(id=requirement_id)
+            if not work_item:
+                print(f"[ERROR] No work item found for ID: {requirement_id}")
+                return None
+            return Requirement.from_ado_work_item(work_item)
         except Exception as e:
             print(f"[AUTH/ADO ERROR] Failed to fetch requirement '{requirement_id}': {e}.\n"
                   f"Check if your PAT is valid, has correct permissions, and if the organization/project/ID are correct.")
@@ -250,21 +223,48 @@ class ADOClient:
                 id=requirement_id,
                 expand="Relations"
             )
-            
             child_ids = []
             if work_item.relations:
                 for relation in work_item.relations:
                     if relation.rel == "System.LinkTypes.Hierarchy-Forward":
-                        # Extract work item ID from URL
                         url_parts = relation.url.split('/')
                         child_id = int(url_parts[-1])
                         child_ids.append(child_id)
-            
             return child_ids
-            
         except Exception as e:
-            raise Exception(f"Failed to get child stories: {str(e)}")
-    
+            raise Exception(f"Failed to get child stories for requirement {requirement_id}: {str(e)}")
+
+    def get_requirement_by_id(self, requirement_id) -> Optional[Requirement]:
+        """Get a single requirement by numeric ID or by title if not numeric"""
+        try:
+            # Try to convert to int for numeric IDs
+            try:
+                numeric_id = int(requirement_id)
+                work_item = self.wit_client.get_work_item(id=numeric_id)
+                if not work_item:
+                    print(f"[ERROR] No work item found for ID: {requirement_id}")
+                    return None
+                return Requirement.from_ado_work_item(work_item)
+            except ValueError:
+                # Not a numeric ID, search by title
+                print(f"[INFO] Requirement ID '{requirement_id}' is not numeric. Searching by title...")
+                wiql_query = f"""
+                SELECT [System.Id], [System.Title], [System.Description], [System.State]
+                FROM WorkItems
+                WHERE [System.Title] = '{requirement_id}'
+                AND [System.TeamProject] = '{self.project}'
+                """
+                wiql_result = self.wit_client.query_by_wiql({"query": wiql_query})
+                if not wiql_result.work_items:
+                    print(f"[ERROR] No work item found with title: {requirement_id}")
+                    return None
+                work_item_id = wiql_result.work_items[0].id
+                work_item = self.wit_client.get_work_item(id=work_item_id)
+                return Requirement.from_ado_work_item(work_item)
+        except Exception as e:
+            print(f"[ERROR] Failed to get requirement by id or title: {str(e)}")
+            return None
+
     def update_work_item(self, work_item_id: int, update_data: Dict[str, Any]) -> bool:
         """Update an existing work item"""
         try:
