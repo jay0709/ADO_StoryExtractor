@@ -30,6 +30,7 @@ class MonitorConfig:
     log_level: str = "INFO"
     epic_ids: List[str] = None
     auto_sync: bool = True
+    auto_extract_new_epics: bool = True  # New option to control story extraction for new epics
     notification_webhook: Optional[str] = None
     retry_attempts: int = 3
     retry_delay_seconds: int = 60
@@ -349,7 +350,20 @@ class EpicChangeMonitor:
         new_epics = all_epic_ids - current_epic_ids
         for epic_id in new_epics:
             self.logger.info(f"Auto-detect: Adding new Epic {epic_id} to monitoring.")
-            self.add_epic(epic_id)
+            added_successfully = self.add_epic(epic_id)
+            if added_successfully and self.config.auto_extract_new_epics:
+                self.logger.info(f"Auto-extraction enabled: Extracting stories for new Epic {epic_id}.")
+                try:
+                    extraction_result = self.agent.synchronize_epic(epic_id)
+                    if extraction_result.sync_successful:
+                        self.logger.info(f"Successfully extracted and synchronized {len(extraction_result.created_stories)} stories for new Epic {epic_id}.")
+                        self.logger.info(f"  Story IDs: {extraction_result.created_stories}")
+                    else:
+                        self.logger.error(f"Failed to extract and synchronize stories for new Epic {epic_id}: {extraction_result.error_message}")
+                except Exception as e:
+                    self.logger.error(f"Exception during extraction for new Epic {epic_id}: {e}")
+            elif added_successfully:
+                self.logger.info(f"Auto-extraction disabled: Skipping story extraction for new Epic {epic_id}. Only monitoring for changes.")
         # Optionally, remove Epics that no longer exist in ADO
         # removed_epics = current_epic_ids - all_epic_ids
         # for epic_id in removed_epics:
@@ -367,6 +381,7 @@ class EpicChangeMonitor:
         self.logger.info(f"Monitoring {len(self.monitored_epics)} EPICs")
         self.logger.info(f"Poll interval: {self.config.poll_interval_seconds} seconds")
         self.logger.info(f"Auto-sync enabled: {self.config.auto_sync}")
+        self.logger.info(f"Auto-extract new epics: {self.config.auto_extract_new_epics}")
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)

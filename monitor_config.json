@@ -7,6 +7,7 @@
     "1"
   ],
   "auto_sync": true,
+  "auto_extract_new_epics": true,
   "notification_webhook": null,
   "retry_attempts": 3,
   "retry_delay_seconds": 60

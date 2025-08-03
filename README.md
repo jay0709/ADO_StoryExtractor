@@ -215,6 +215,7 @@ python monitor_daemon.py --mode api --port 5000
   "log_level": "INFO",
   "epic_ids": ["123", "456"],
   "auto_sync": true,
+  "auto_extract_new_epics": true,
   "notification_webhook": null,
   "retry_attempts": 3,
   "retry_delay_seconds": 60
@@ -298,6 +299,170 @@ pytest tests/test_story_extractor.py
 3. Run monitoring service in background
 4. Use API mode for integration with other tools
 5. Set up proper logging and alerting
+
+## Daemon Enhancement: Auto-Extract Stories from New Epics
+
+The Enhanced ADO Story Extractor daemon now automatically extracts user stories from newly detected epics while maintaining the existing change detection functionality.
+
+## Features
+
+### 🔥 **NEW**: Auto-Extract Stories from New Epics
+- **Automatic Discovery**: Daemon continuously scans Azure DevOps for new epics
+- **Immediate Processing**: When a new epic is detected, stories are automatically extracted using AI
+- **Configurable**: Can be enabled/disabled via the `auto_extract_new_epics` configuration option
+- **Smart Integration**: Works alongside existing change detection for modified epics
+
+### 🔄 **EXISTING**: Change Detection and Sync
+- **Content Monitoring**: Tracks changes in epic title and description using SHA256 hashing
+- **Automatic Re-sync**: Re-extracts and updates stories when epic content changes
+- **Snapshot Management**: Maintains historical snapshots for change comparison
+
+## Configuration
+
+### New Configuration Option
+
+Add the following to your `monitor_config.json`:
+
+```json
+{
+  "poll_interval_seconds": 30,
+  "auto_sync": true,
+  "auto_extract_new_epics": true,
+  "epic_ids": ["1"],
+  ...
+}
+```
+
+### Configuration Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `auto_extract_new_epics` | boolean | `true` | Enable/disable automatic story extraction for new epics |
+| `auto_sync` | boolean | `true` | Enable/disable automatic sync for changed epics |
+| `poll_interval_seconds` | integer | `300` | How often to check for new epics and changes |
+
+## How It Works
+
+### 1. Epic Discovery Process
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│ Scan Azure DevOps│ -[200d>[200d│ Compare with    │ -[200d>[200d│ Identify New    │
+│ for All Epics   │    │ Monitored List  │    │ Epics           │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### 2. New Epic Processing
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│ Add Epic to     │ -[200d>[200d│ Extract Stories │ -[200d>[200d│ Create Stories  │
+│ Monitoring      │    │ using AI        │    │ in Azure DevOps │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### 3. Ongoing Monitoring
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│ Monitor for     │ -[200d>[200d│ Detect Changes  │ -[200d>[200d│ Re-sync Stories │
+│ Content Changes │    │ via Hashing     │    │ if Changed      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Example Output
+
+```
+2025-08-03 13:25:06 - EpicChangeMonitor - INFO - Starting EPIC Change Monitor
+2025-08-03 13:25:06 - EpicChangeMonitor - INFO - Auto-extract new epics: True
+2025-08-03 13:25:08 - EpicChangeMonitor - INFO - Auto-detect: Adding new Epic 42 to monitoring.
+2025-08-03 13:25:09 - EpicChangeMonitor - INFO - Auto-extraction enabled: Extracting stories for new Epic 42.
+2025-08-03 13:25:12 - EpicChangeMonitor - INFO - Successfully extracted and synchronized 3 stories for new Epic 42.
+2025-08-03 13:25:12 - EpicChangeMonitor - INFO -   Story IDs: [156, 157, 158]
+```
+
+## Benefits
+
+### For Development Teams
+- **Zero Manual Intervention**: New epics are automatically processed
+- **Consistent Story Quality**: AI-powered extraction ensures consistent user story format
+- **Real-time Updates**: Stories are available immediately after epic creation
+- **Change Tracking**: Modifications to epics trigger automatic story updates
+
+### For Project Managers
+- **Complete Coverage**: No epics are missed or forgotten
+- **Audit Trail**: Full history of when stories were created/updated
+- **Flexible Control**: Can disable auto-extraction if manual review is preferred
+- **Status Visibility**: Clear logging shows what was processed and when
+
+## Migration Guide
+
+### Existing Users
+1. Update your `monitor_config.json` to include `"auto_extract_new_epics": true`
+2. Restart the daemon - no other changes required
+3. New epics will be automatically processed on the next polling cycle
+
+### New Users
+1. Follow the standard setup process in the main README
+2. The enhanced functionality is enabled by default
+3. Start the daemon with `python3 monitor_daemon.py --mode standalone`
+
+## Technical Details
+
+### Epic Detection Algorithm
+- Fetches all epics from Azure DevOps using work item type filtering
+- Compares against currently monitored epic set
+- Identifies new epics using set difference operation
+- Processes new epics immediately upon detection
+
+### Story Extraction Process
+- Uses OpenAI GPT to analyze epic content
+- Generates structured user stories with acceptance criteria
+- Creates work items in Azure DevOps with proper parent-child relationships
+- Maintains snapshots for future change detection
+
+### Error Handling
+- Retry logic for failed API calls (configurable attempts and delays)
+- Graceful handling of epic access issues
+- Automatic removal of epics that become inaccessible
+- Comprehensive logging for troubleshooting
+
+## Performance Considerations
+
+- **Polling Frequency**: Default 30-second intervals balance responsiveness with API usage
+- **Concurrent Processing**: Configurable max concurrent syncs (default: 3)
+- **API Rate Limits**: Built-in retry logic respects Azure DevOps and OpenAI limits
+- **Memory Usage**: Efficient snapshot storage and cleanup
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Stories not being extracted for new epics**
+   - Check `auto_extract_new_epics` is set to `true`
+   - Verify Azure DevOps and OpenAI credentials
+   - Review logs for specific error messages
+
+2. **Duplicate processing**
+   - Daemon prevents duplicate processing through state tracking
+   - Snapshots ensure epics are only processed when actually new
+
+3. **Performance issues**
+   - Adjust `poll_interval_seconds` to reduce API calls
+   - Decrease `max_concurrent_syncs` if hitting rate limits
+
+### Log Analysis
+```bash
+# Monitor daemon activity
+tail -f logs/epic_monitor.log
+
+# Check for specific epic processing
+grep "Epic 42" logs/epic_monitor.log
+```
+
+## Future Enhancements
+
+- Webhook support for real-time epic notifications
+- Custom story templates per epic type
+- Integration with project management tools
+- Advanced story prioritization based on epic metadata
 
 ## 🤝 Contributing
 

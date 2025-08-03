@@ -161,8 +161,9 @@ class StoryExtractionAgent:
                     # Example: story_id = self.ado_client.create_story(story)
                     story_id = None  # Placeholder for the created story's ID
                     try:
-                        # Replace with actual upload logic and get the ID
-                        story_id = self.ado_client.create_story(story)  # This should return an int ID
+                        # Use existing create_user_story method with proper format
+                        story_data = story.to_ado_format()
+                        story_id = self.ado_client.create_user_story(story_data, epic_id)
                     except Exception as upload_exc:
                         self.logger.error(f"[AGENT] Failed to upload story '{story.heading}': {upload_exc}")
                         continue
