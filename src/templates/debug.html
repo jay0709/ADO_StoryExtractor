@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADO Story Extractor - Debug Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .btn { padding: 10px 15px; margin: 5px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; }
+        .btn:hover { background: #0056b3; }
+        .status-card { border: 1px solid #ddd; padding: 20px; margin: 10px 0; border-radius: 8px; }
+        .loading { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; border-radius: 8px; }
+        .toast { display: none; position: fixed; top: 20px; right: 20px; background: #28a745; color: white; padding: 15px; border-radius: 4px; z-index: 1000; }
+        #result { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 4px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>ADO Story Extractor - Debug Dashboard</h1>
+    
+    <!-- Status Section -->
+    <div class="status-card">
+        <h2>System Status</h2>
+        <p>Status: <span id="monitor-status">Loading...</span></p>
+        <p>EPICs: <span id="epic-count">0</span></p>
+        <button id="refresh-status" class="btn">Refresh Status</button>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="status-card">
+        <h2>Control Panel</h2>
+        <button id="start-monitor" class="btn">Start Monitoring</button>
+        <button id="stop-monitor" class="btn">Stop Monitoring</button>
+        <button id="force-check" class="btn">Force Check</button>
+        <button id="health-check" class="btn">Health Check</button>
+    </div>
+
+    <!-- EPIC Management -->
+    <div class="status-card">
+        <h2>EPIC Management</h2>
+        <input type="text" id="new-epic-id" placeholder="Enter EPIC ID..." style="padding: 8px; margin-right: 10px;">
+        <button id="add-epic" class="btn">Add EPIC</button>
+        <div id="epic-list" style="margin-top: 15px;">
+            <p>Loading EPICs...</p>
+        </div>
+    </div>
+
+    <!-- Result Display -->
+    <div class="status-card">
+        <h2>Debug Output</h2>
+        <div id="result">Ready for testing...</div>
+        <button id="clear-result" class="btn">Clear</button>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading" id="loading">Processing...</div>
+    
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <span id="toast-message"></span>
+        <button onclick="document.getElementById('toast').style.display='none'" style="background: none; border: none; color: white; margin-left: 10px; cursor: pointer;">×</button>
+    </div>
+
+    <script>
+        console.log('Debug dashboard loading...');
+        
+        // Utility functions
+        const showToast = (message) => {
+            document.getElementById('toast-message').textContent = message;
+            document.getElementById('toast').style.display = 'block';
+            setTimeout(() => {
+                document.getElementById('toast').style.display = 'none';
+            }, 3000);
+        };
+
+        const showLoading = (flag) => {
+            document.getElementById('loading').style.display = flag ? 'block' : 'none';
+        };
+
+        const logResult = (message) => {
+            const result = document.getElementById('result');
+            const timestamp = new Date().toLocaleTimeString();
+            result.textContent += `[${timestamp}] ${message}\n`;
+            result.scrollTop = result.scrollHeight;
+        };
+
+        // API functions
+        const updateStatus = async () => {
+            showLoading(true);
+            try {
+                logResult('Fetching status...');
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                logResult(`Status response: ${JSON.stringify(data, null, 2)}`);
+                
+                document.getElementById('monitor-status').textContent = data.is_running ? 'Running' : 'Stopped';
+                document.getElementById('epic-count').textContent = data.monitored_epics ? Object.keys(data.monitored_epics).length : 0;
+                
+                showToast('Status updated');
+            } catch (err) {
+                logResult(`Status error: ${err.message}`);
+                showToast('Failed to fetch status');
+            } finally {
+                showLoading(false);
+            }
+        };
+
+        const updateEpics = async () => {
+            try {
+                logResult('Fetching EPICs...');
+                const response = await fetch('/api/epics');
+                const data = await response.json();
+                logResult(`EPICs response: ${JSON.stringify(data, null, 2)}`);
+                
+                const epicList = document.getElementById('epic-list');
+                if (data.epics && data.epics.length > 0) {
+                    epicList.innerHTML = '<h3>Monitored EPICs:</h3>';
+                    data.epics.forEach(epic => {
+                        epicList.innerHTML += `<div style="margin: 5px 0; padding: 5px; background: #f0f0f0;">
+                            EPIC ${epic} 
+                            <button onclick="removeEpic('${epic}')" style="margin-left: 10px; background: #dc3545; color: white; border: none; padding: 2px 8px; cursor: pointer;">Remove</button>
+                        </div>`;
+                    });
+                } else {
+                    epicList.innerHTML = '<p>No EPICs being monitored</p>';
+                }
+            } catch (err) {
+                logResult(`EPICs error: ${err.message}`);
+            }
+        };
+
+        // Global function for removing EPICs
+        window.removeEpic = async (epicId) => {
+            if (!confirm(`Remove EPIC ${epicId}?`)) return;
+            
+            showLoading(true);
+            try {
+                logResult(`Removing EPIC ${epicId}...`);
+                const response = await fetch(`/api/epics/${epicId}`, { method: 'DELETE' });
+                const data = await response.json();
+                logResult(`Remove response: ${JSON.stringify(data, null, 2)}`);
+                showToast(data.message || 'EPIC removed');
+                updateEpics();
+            } catch (err) {
+                logResult(`Remove error: ${err.message}`);
+                showToast('Failed to remove EPIC');
+            } finally {
+                showLoading(false);
+            }
+        };
+
+        // Button event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded, setting up event listeners...');
+            
+            document.getElementById('refresh-status').addEventListener('click', updateStatus);
+            
+            document.getElementById('start-monitor').addEventListener('click', async () => {
+                showLoading(true);
+                try {
+                    logResult('Starting monitor...');
+                    const response = await fetch('/api/start', { method: 'POST' });
+                    const data = await response.json();
+                    logResult(`Start response: ${JSON.stringify(data, null, 2)}`);
+                    showToast(data.message || 'Monitor started');
+                    updateStatus();
+                } catch (err) {
+                    logResult(`Start error: ${err.message}`);
+                    showToast('Failed to start monitor');
+                } finally {
+                    showLoading(false);
+                }
+            });
+            
+            document.getElementById('stop-monitor').addEventListener('click', async () => {
+                showLoading(true);
+                try {
+                    logResult('Stopping monitor...');
+                    const response = await fetch('/api/stop', { method: 'POST' });
+                    const data = await response.json();
+                    logResult(`Stop response: ${JSON.stringify(data, null, 2)}`);
+                    showToast(data.message || 'Monitor stopped');
+                    updateStatus();
+                } catch (err) {
+                    logResult(`Stop error: ${err.message}`);
+                    showToast('Failed to stop monitor');
+                } finally {
+                    showLoading(false);
+                }
+            });
+            
+            document.getElementById('force-check').addEventListener('click', async () => {
+                showLoading(true);
+                try {
+                    logResult('Force checking...');
+                    const response = await fetch('/api/check', { method: 'POST' });
+                    const data = await response.json();
+                    logResult(`Force check response: ${JSON.stringify(data, null, 2)}`);
+                    showToast('Check completed');
+                } catch (err) {
+                    logResult(`Force check error: ${err.message}`);
+                    showToast('Check failed');
+                } finally {
+                    showLoading(false);
+                }
+            });
+            
+            document.getElementById('health-check').addEventListener('click', async () => {
+                showLoading(true);
+                try {
+                    logResult('Health checking...');
+                    const response = await fetch('/api/health');
+                    const data = await response.json();
+                    logResult(`Health check response: ${JSON.stringify(data, null, 2)}`);
+                    showToast('Health check completed');
+                } catch (err) {
+                    logResult(`Health check error: ${err.message}`);
+                    showToast('Health check failed');
+                } finally {
+                    showLoading(false);
+                }
+            });
+            
+            document.getElementById('add-epic').addEventListener('click', async () => {
+                const epicId = document.getElementById('new-epic-id').value.trim();
+                if (!epicId) {
+                    showToast('Please enter an EPIC ID');
+                    return;
+                }
+                
+                showLoading(true);
+                try {
+                    logResult(`Adding EPIC ${epicId}...`);
+                    const response = await fetch(`/api/epics/${epicId}`, { method: 'POST' });
+                    const data = await response.json();
+                    logResult(`Add EPIC response: ${JSON.stringify(data, null, 2)}`);
+                    showToast(data.message || 'EPIC added');
+                    document.getElementById('new-epic-id').value = '';
+                    updateEpics();
+                } catch (err) {
+                    logResult(`Add EPIC error: ${err.message}`);
+                    showToast('Failed to add EPIC');
+                } finally {
+                    showLoading(false);
+                }
+            });
+            
+            document.getElementById('clear-result').addEventListener('click', () => {
+                document.getElementById('result').textContent = 'Ready for testing...\n';
+            });
+            
+            // Initial load
+            logResult('Initializing dashboard...');
+            updateStatus();
+            updateEpics();
+        });
+    </script>
+</body>
+</html>

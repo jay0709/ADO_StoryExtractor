@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Test</title>
+</head>
+<body>
+    <h1>Debug Test</h1>
+    <button id="test-btn">Test API Call</button>
+    <div id="result"></div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded');
+            
+            document.getElementById('test-btn').addEventListener('click', async () => {
+                console.log('Button clicked');
+                try {
+                    const response = await fetch('http://127.0.0.1:8080/api/health');
+                    const data = await response.json();
+                    console.log('Response:', data);
+                    document.getElementById('result').innerHTML = JSON.stringify(data, null, 2);
+                } catch (error) {
+                    console.error('Error:', error);
+                    document.getElementById('result').innerHTML = 'Error: ' + error.message;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

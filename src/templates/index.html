@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADO Story Extractor - Agent Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-robot"></i> ADO Story Extractor</h1>
+            <p class="subtitle">Agent Operations Dashboard</p>
+        </header>
+
+
+        <!-- Metrics Section -->
+        <section class="metrics-section">
+            <div class="metrics-container">
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-eye"></i>
+                    </div>
+                    <div class="metric-content">
+                        <div class="metric-value" id="total-checks">0</div>
+                        <div class="metric-label">Total Checks</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <div class="metric-content">
+                        <div class="metric-value" id="changes-detected">0</div>
+                        <div class="metric-label">Changes Detected</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="metric-content">
+                        <div class="metric-value" id="uptime">--:--:--</div>
+                        <div class="metric-label">Uptime</div>
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-icon">
+                        <i class="fas fa-tasks"></i>
+                    </div>
+                    <div class="metric-content">
+                        <div class="metric-value" id="active-epics">0</div>
+                        <div class="metric-label">Active EPICs</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Status Section -->
+        <section class="status-section">
+            <div class="status-card" id="status-card">
+                <div class="status-header">
+                    <h2><i class="fas fa-heartbeat"></i> System Status</h2>
+                    <button id="refresh-status" class="btn btn-secondary">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="status-content">
+                    <div class="status-item">
+                        <span class="label">Status:</span>
+                        <span id="monitor-status" class="status-badge">Loading...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Last Check:</span>
+                        <span id="last-check">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Monitored EPICs:</span>
+                        <span id="epic-count">0</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Control Panel -->
+        <section class="control-section">
+            <div class="control-card">
+                <h2><i class="fas fa-gamepad"></i> Control Panel</h2>
+                <div class="control-buttons">
+                    <button id="start-monitor" class="btn btn-success">
+                        <i class="fas fa-play"></i> Start Monitoring
+                    </button>
+                    <button id="stop-monitor" class="btn btn-danger">
+                        <i class="fas fa-stop"></i> Stop Monitoring
+                    </button>
+                    <button id="force-check" class="btn btn-warning">
+                        <i class="fas fa-search"></i> Force Check
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- EPIC Management -->
+        <section class="epic-section">
+            <div class="epic-card">
+                <div class="epic-header">
+                    <h2><i class="fas fa-list"></i> EPIC Management</h2>
+                    <div class="epic-controls">
+                        <input type="text" id="new-epic-id" placeholder="Enter EPIC ID..." class="epic-input">
+                        <button id="add-epic" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Add EPIC
+                        </button>
+                    </div>
+                </div>
+                <div class="epic-list" id="epic-list">
+                    <p class="no-epics">No EPICs being monitored</p>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- Configuration -->
+        <section class="config-section">
+            <div class="config-card">
+                <div class="config-header">
+                    <h2><i class="fas fa-cog"></i> Configuration</h2>
+                    <div class="config-controls">
+                        <button id="edit-config" class="btn btn-primary">
+                            <i class="fas fa-edit"></i> Edit Config
+                        </button>
+                        <button id="save-config" class="btn btn-success" style="display: none;">
+                            <i class="fas fa-save"></i> Save Config
+                        </button>
+                        <button id="cancel-config" class="btn btn-secondary" style="display: none;">
+                            <i class="fas fa-times"></i> Cancel
+                        </button>
+                    </div>
+                </div>
+                <div class="config-content" id="config-content">
+                    <p>Loading configuration...</p>
+                </div>
+                <div id="config-editor" style="display: none;">
+                    <div class="config-edit-item">
+                        <label for="edit-poll-interval">Poll Interval (seconds):</label>
+                        <input type="number" id="edit-poll-interval" min="1" max="3600">
+                    </div>
+                    <div class="config-edit-item">
+                        <label for="edit-auto-sync">Auto Sync:</label>
+                        <input type="checkbox" id="edit-auto-sync">
+                    </div>
+                    <div class="config-edit-item">
+                        <label for="edit-epic-ids">EPIC IDs (comma-separated):</label>
+                        <input type="text" id="edit-epic-ids" placeholder="1,2,3">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Activity Log -->
+        <section class="log-section">
+            <div class="log-card">
+                <div class="log-header">
+                    <h2><i class="fas fa-terminal"></i> Activity Log</h2>
+                    <div class="log-controls">
+                        <button id="refresh-logs" class="btn btn-primary">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                        <button id="clear-log" class="btn btn-secondary">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="log-content" id="log-content">
+                    <div class="log-entry">
+                        <span class="log-time">[System]</span>
+                        <span class="log-message">Dashboard loaded</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- System Information -->
+        <section class="system-section">
+            <div class="system-card">
+                <div class="system-header">
+                    <h2><i class="fas fa-info-circle"></i> System Information</h2>
+                    <div class="system-controls">
+                        <button id="health-check" class="btn btn-info">
+                            <i class="fas fa-heartbeat"></i> Health Check
+                        </button>
+                        <button id="api-docs" class="btn btn-info">
+                            <i class="fas fa-book"></i> API Docs
+                        </button>
+                    </div>
+                </div>
+                <div class="system-content" id="system-content">
+                    <div class="system-item">
+                        <span class="label">API Status:</span>
+                        <span id="api-status" class="status-badge">Unknown</span>
+                    </div>
+                    <div class="system-item">
+                        <span class="label">Last Health Check:</span>
+                        <span id="last-health-check">-</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner"></div>
+        <p>Processing...</p>
+    </div>
+
+    <!-- Notification Toast -->
+    <div class="toast" id="toast">
+        <div class="toast-content">
+            <span id="toast-message"></span>
+            <button id="toast-close" class="toast-close">&times;</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

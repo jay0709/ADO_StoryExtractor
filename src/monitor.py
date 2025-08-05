@@ -28,12 +28,16 @@ class MonitorConfig:
     max_concurrent_syncs: int = 3
     snapshot_directory: str = "snapshots"
     log_level: str = "INFO"
-    epic_ids: List[str] = None
+    epic_ids: Optional[List[str]] = None
     auto_sync: bool = True
     auto_extract_new_epics: bool = True  # New option to control story extraction for new epics
     notification_webhook: Optional[str] = None
     retry_attempts: int = 3
     retry_delay_seconds: int = 60
+    
+    def __post_init__(self):
+        if self.epic_ids is None:
+            self.epic_ids = []
 
 
 @dataclass
@@ -431,9 +435,24 @@ class EpicChangeMonitor:
         
         # Run the monitoring loop
         try:
-            asyncio.run(self._monitor_loop())
+            # Check if we're in a thread and need to create a new event loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # We're in a thread, create a new event loop
+                    asyncio.set_event_loop(asyncio.new_event_loop())
+                    loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # No event loop exists, create one
+                asyncio.set_event_loop(asyncio.new_event_loop())
+                loop = asyncio.get_event_loop()
+            
+            # Start the monitoring loop
+            loop.run_until_complete(self._monitor_loop())
         except KeyboardInterrupt:
             self.logger.info("Received interrupt signal")
+        except Exception as e:
+            self.logger.error(f"Error in monitor start: {e}")
         finally:
             self.stop()
     

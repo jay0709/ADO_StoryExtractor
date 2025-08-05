@@ -1,11 +1,9 @@
 {
-  "poll_interval_seconds": 30,
+  "poll_interval_seconds": 300,
   "max_concurrent_syncs": 3,
   "snapshot_directory": "snapshots",
   "log_level": "INFO",
-  "epic_ids": [
-    "1"
-  ],
+  "epic_ids": [],
   "auto_sync": true,
   "auto_extract_new_epics": true,
   "notification_webhook": null,

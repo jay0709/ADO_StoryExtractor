@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  ado-story-extractor:
+    build: .
+    container_name: ado-story-extractor
+    env_file:
+      - .env
+    volumes:
+      # Persist logs and snapshots
+      - ./logs:/app/logs
+      - ./snapshots:/app/snapshots
+      - ./monitor_state.json:/app/monitor_state.json
+      - ./monitor_config.json:/app/monitor_config.json
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    # Override the default command based on your needs
+    # Examples:
+    # command: ["python", "main.py", "validate-config"]
+    # command: ["python", "demo_epic_sync.py"]
+    # command: ["python", "monitor_daemon.py", "--mode", "standalone"]
+    # command: ["python", "monitor_daemon.py", "--mode", "api", "--host", "0.0.0.0", "--port", "8080"]
+    
+  # For API mode
+  ado-story-extractor-api:
+    build: .
+    container_name: ado-story-extractor-api
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/app/logs
+      - ./snapshots:/app/snapshots
+      - ./monitor_state.json:/app/monitor_state.json
+      - ./monitor_config.json:/app/monitor_config.json
+    command: ["python", "monitor_daemon.py", "--mode", "api", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    profiles:
+      - api

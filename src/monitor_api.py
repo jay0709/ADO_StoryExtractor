@@ -4,10 +4,18 @@ REST API interface for controlling the EPIC monitoring service.
 """
 
 import json
+import os
+import sys
 import threading
 from datetime import datetime
-from flask import Flask, request, jsonify
+from pathlib import Path
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 from typing import Optional
+
+# Add the project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 from src.monitor import EpicChangeMonitor, MonitorConfig, load_config_from_file, create_default_config
 
@@ -16,7 +24,23 @@ class MonitorAPI:
     """REST API wrapper for the EPIC monitor"""
     
     def __init__(self, config: MonitorConfig):
-        self.app = Flask(__name__)
+        import os
+        template_dir = os.path.join(os.path.dirname(__file__), 'templates')
+        static_dir = os.path.join(os.path.dirname(__file__), 'static')
+        self.app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+        
+        # Enable CORS for all routes
+        try:
+            CORS(self.app)
+        except:
+            # If flask-cors is not installed, add basic CORS headers manually
+            @self.app.after_request
+            def after_request(response):
+                response.headers.add('Access-Control-Allow-Origin', '*')
+                response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+                response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+                return response
+        
         self.monitor: Optional[EpicChangeMonitor] = None
         self.monitor_thread: Optional[threading.Thread] = None
         self.config = config
@@ -26,6 +50,16 @@ class MonitorAPI:
     
     def _setup_routes(self):
         """Setup Flask routes"""
+        
+        @self.app.route('/', methods=['GET'])
+        def dashboard():
+            """Serve the web dashboard"""
+            return render_template('index.html')
+        
+        @self.app.route('/debug', methods=['GET'])
+        def debug_dashboard():
+            """Serve the debug dashboard"""
+            return render_template('debug.html')
         
         @self.app.route('/api/status', methods=['GET'])
         def get_status():
@@ -274,8 +308,8 @@ class MonitorAPI:
                 'monitor_running': self.monitor.is_running if self.monitor else False
             })
         
-        @self.app.route('/', methods=['GET'])
-        def index():
+        @self.app.route('/api/docs', methods=['GET'])
+        def api_docs():
             """API documentation"""
             return jsonify({
                 'name': 'EPIC Change Monitor API',
